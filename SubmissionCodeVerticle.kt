@@ -31,7 +31,7 @@ private typealias InnerListRequest = org.jetbrains.research.kotoed.data.vcs.List
 private typealias InnerListResponse = org.jetbrains.research.kotoed.data.vcs.ListResponse
 private typealias InnerReadRequest = org.jetbrains.research.kotoed.data.vcs.ReadRequest
 private typealias InnerReadResponse = org.jetbrains.research.kotoed.data.vcs.ReadResponse
-
+// комент
 @AutoDeployable
 class SubmissionCodeVerticle : AbstractKotoedVerticle() {
     private data class CommitInfo(val repo: RepositoryInfo, val revision: String, val cloneStatus: CloneStatus) : Jsonable
@@ -120,7 +120,6 @@ class SubmissionCodeVerticle : AbstractKotoedVerticle() {
             dbFindAsync(SubmissionRecord().apply { projectId = submission.projectId })
         println("============= FULL TABLE =============")
         println(submission.id)
-        println("======================================")
         println(projectSubmissions.toString())
         println("======================================")
         println("============= START2 =============")
@@ -338,7 +337,10 @@ class SubmissionCodeVerticle : AbstractKotoedVerticle() {
                 baseRev = null
             }
         }
-
+    @JsonableEventBusConsumerFor(Address.Api.Course.Code.List)
+    suspend fun handleCourseCodeList(message: CrsListRequest): ListResponse {
+        val course: CourseRecord = dbFetchAsync(CourseRecord().apply { id = message.courseId })
+        val repoInfo = getCommitInfo(course)
         val diff: DiffResponse = when (baseRev) {
             null -> DiffResponse(listOf())
             else -> sendJsonableAsync(
