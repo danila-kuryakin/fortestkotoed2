@@ -31,7 +31,7 @@ private typealias InnerListRequest = org.jetbrains.research.kotoed.data.vcs.List
 private typealias InnerListResponse = org.jetbrains.research.kotoed.data.vcs.ListResponse
 private typealias InnerReadRequest = org.jetbrains.research.kotoed.data.vcs.ReadRequest
 private typealias InnerReadResponse = org.jetbrains.research.kotoed.data.vcs.ReadResponse
-// комент
+
 @AutoDeployable
 class SubmissionCodeVerticle : AbstractKotoedVerticle() {
     private data class CommitInfo(val repo: RepositoryInfo, val revision: String, val cloneStatus: CloneStatus) : Jsonable
@@ -102,8 +102,7 @@ class SubmissionCodeVerticle : AbstractKotoedVerticle() {
         return CrsReadResponse(contents = inner.contents, status = CloneStatus.done)
     }
 
-    lateinit var nextSubm : SubmissionRecord
-    lateinit var diffContext: String
+
 
     @JsonableEventBusConsumerFor(Address.Api.Submission.Code.Read)
     suspend fun handleSubmissionCodeRead(message: SubReadRequest): SubReadResponse {
@@ -116,63 +115,50 @@ class SubmissionCodeVerticle : AbstractKotoedVerticle() {
             }
         }
 
-        val projectSubmissions =
-            dbFindAsync(SubmissionRecord().apply { projectId = submission.projectId })
-        println("============= FULL TABLE =============")
-        println(submission.id)
-        println(projectSubmissions.toString())
-        println("======================================")
-        println("============= START2 =============")
         // Поиск предыдущего закрытого сабмишена
-        val projectSubmissions2 = dbFindAsync(SubmissionRecord().apply { projectId = submission.projectId })
-
-        var psItrator = projectSubmissions2.iterator()
-        nextSubm = submission
+        val projectSubmissions = dbFindAsync(SubmissionRecord().apply { projectId = submission.projectId })
+        var psItrator = projectSubmissions.iterator()
+        var nextSubm = submission
         while (psItrator.hasNext()){ // Ищим выбранный сабмишен в таблице
             var subm = psItrator.next()
             if (subm.revision == submission.revision){
-                println(subm)
                 while (psItrator.hasNext()) { // Ищим предыдущий закрытый сабмишен
                     nextSubm = psItrator.next()
-                    if(nextSubm.state == SubmissionState.closed) {
-                        println(nextSubm)
+                    if(nextSubm.state == SubmissionState.closed)
                         break
-                    }
                 }
             }
         }
-        println("============= START2 END =============")
 
-        println("============= START3 =============")
         var revisionSubm = VcsRoot.Revision(submission.revision)
         val revisionNextSubm = VcsRoot.Revision(nextSubm.revision)
+        var diffContext = ""
+        var diffStr = ""
+        if(revisionSubm != revisionNextSubm && nextSubm != null) {
 
-
-        if(revisionSubm != revisionNextSubm) {
             // Поиск проекта
             val project = dbFindAsync(ProjectRecord().apply { id = submission.projectId }).firstOrNull()
 
             val defaultEnv by lazy { Config.VCS.DefaultEnvironment }
-
             val parseStr = GitParsing()
-
             val dir by lazy { File(System.getProperty("user.dir"), Config.VCS.StoragePath) }
 
+            // git diff
+            if(project != null) {
+                val git = Git(project.repoUrl, File(dir, repoInfo.repo.uid).absolutePath, defaultEnv)
+                diffStr = git?.diff(
+                    message.path,
+                    VcsRoot.Revision(nextSubm.revision), VcsRoot.Revision(submission.revision), Magic.gitUnified
+                ).toString()
 
-            val git = Git(project!!.repoUrl, File(dir, repoInfo.repo.uid).absolutePath, defaultEnv)
-            val diffStr = git?.diff(
-                message.path,
-                VcsRoot.Revision(nextSubm.revision), VcsRoot.Revision(submission.revision)
-            )
+                diffContext = parseStr.parsingContext(diffStr)
+            }
 
-            println(diffStr.toString())
-            println("=============================\n")
-//            diffContext = parseStr.parsingDiffContext(diffStr.toString())
-//            println(diffContext)
-//        println(parseStr.parsingContext(diffStr.toString()))
-            println("============= START3 END =============")
         }
-
+        // Если diff выполнен, то возвращаем его текст
+        if(!diffContext.equals(""))
+            return SubReadResponse(contents = diffContext, status = CloneStatus.done)
+        // Если diff не выполнен, то возвращаем текст файла
         val inner: InnerReadResponse = sendJsonableAsync(
                 Address.Code.Read,
                 InnerReadRequest(
@@ -188,9 +174,7 @@ class SubmissionCodeVerticle : AbstractKotoedVerticle() {
                 .lineSequence()
                 .drop(from)
                 .take(to - from + 1)
-                .joinToString(separator = "\n") +
-                "\n\n==========================\n\n" +
-                diffContext
+                .joinToString(separator = "\n")
 
         return SubReadResponse(contents = contents, status = CloneStatus.done)
     }
@@ -337,10 +321,7 @@ class SubmissionCodeVerticle : AbstractKotoedVerticle() {
                 baseRev = null
             }
         }
-    @JsonableEventBusConsumerFor(Address.Api.Course.Code.List)
-    suspend fun handleCourseCodeList(message: CrsListRequest): ListResponse {
-        val course: CourseRecord = dbFetchAsync(CourseRecord().apply { id = message.courseId })
-        val repoInfo = getCommitInfo(course)
+
         val diff: DiffResponse = when (baseRev) {
             null -> DiffResponse(listOf())
             else -> sendJsonableAsync(
